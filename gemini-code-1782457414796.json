@@ -1,0 +1,152 @@
+{
+  "name": "Telegram FB to WordPress AI + Images (Groq)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"]
+      },
+      "id": "tg_trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const url = $json.message.text;\nreturn [{ json: { url, chat_id: $json.message.chat.id } }];"
+      },
+      "id": "extract",
+      "name": "Extract URL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "responseFormat": "string"
+      },
+      "id": "fetch_fb",
+      "name": "Fetch Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const html = $json.data;\nconst imgRegex = /<img[^>]+src=\\\"([^\\\"]+)\\\"/g;\nlet match;\nlet images = [];\nwhile ((match = imgRegex.exec(html)) !== null) {\n  images.push(match[1]);\n}\nreturn [{ json: { text: html.slice(0, 5000), images } }];"
+      },
+      "id": "extract_images",
+      "name": "Extract Images",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "jsonParameters": true,
+        "headers": {
+          "Authorization": "Bearer YOUR_GROQ_API_KEY",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"model\": \"llama-3.1-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Viết lại chuẩn SEO, trả JSON title content description. Nội dung: \" + $json.text\n    }\n  ]\n}"
+      },
+      "id": "groq",
+      "name": "Groq AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const ai = JSON.parse($json.choices[0].message.content);\nconst images = $node['Extract Images'].json.images;\nreturn [{ json: { ...ai, images } }];"
+      },
+      "id": "parse",
+      "name": "Parse AI",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://yourwordpress.com/wp-json/wp/v2/media",
+        "method": "POST",
+        "jsonParameters": true,
+        "headers": {
+          "Authorization": "Basic YOUR_AUTH"
+        },
+        "bodyParametersJson": "={\n  \"source_url\": $json.images[0]\n}"
+      },
+      "id": "upload_image",
+      "name": "Upload Featured Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://yourwordpress.com/wp-json/wp/v2/posts",
+        "method": "POST",
+        "jsonParameters": true,
+        "headers": {
+          "Authorization": "Basic YOUR_AUTH"
+        },
+        "bodyParametersJson": "={\n  \"title\": $node['Parse AI'].json.title,\n  \"content\": $node['Parse AI'].json.content,\n  \"featured_media\": $json.id,\n  \"status\": \"publish\"\n}"
+      },
+      "id": "wp_post",
+      "name": "WordPress Publish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Extract URL'].json.chat_id}}",
+        "text": "={{'Đã đăng bài: ' + $json.link}}"
+      },
+      "id": "tg_send",
+      "name": "Telegram Result",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1800, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Extract URL", "type": "main", "index": 0 }]]
+    },
+    "Extract URL": {
+      "main": [[{ "node": "Fetch Facebook", "type": "main", "index": 0 }]]
+    },
+    "Fetch Facebook": {
+      "main": [[{ "node": "Extract Images", "type": "main", "index": 0 }]]
+    },
+    "Extract Images": {
+      "main": [[{ "node": "Groq AI", "type": "main", "index": 0 }]]
+    },
+    "Groq AI": {
+      "main": [[{ "node": "Parse AI", "type": "main", "index": 0 }]]
+    },
+    "Parse AI": {
+      "main": [[{ "node": "Upload Featured Image", "type": "main", "index": 0 }]]
+    },
+    "Upload Featured Image": {
+      "main": [[{ "node": "WordPress Publish", "type": "main", "index": 0 }]]
+    },
+    "WordPress Publish": {
+      "main": [[{ "node": "Telegram Result", "type": "main", "index": 0 }]]
+    }
+  }
+}
